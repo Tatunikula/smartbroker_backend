@@ -1,83 +1,82 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import statistics
-import time
+# laskenta/hintatiedot_scraper.py  — PILVI-SAFE VERSIO (ei seleniumia)
+import os, csv, re
+from typing import Tuple, Optional
+from kartta.postinumero_kaupunginosa_map import postinumero_to_kaupunginosa
 
-def hae_hintatiedot_kaupunginosalla(haku: str, max_odotus=15):
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(options=options)
+# CSV oletetaan repo-juuren tiedostoksi: aluehinnat.csv
+CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "aluehinnat.csv")
 
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+def _to_float(val: str) -> Optional[float]:
+    if val is None:
+        return None
+    s = str(val).replace(" ", "").replace("\u00A0", "").replace(",", ".")
+    m = re.search(r"[-+]?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
     try:
-        driver.get("https://asuntojen.hintatiedot.fi/haku")
-        print("📥 Haetaan postinumerolla:", haku)
+        return float(m.group(0))
+    except ValueError:
+        return None
 
-        # Avaa hakulomake mobiilissa tai jos ei muuten näy
-        try:
-            open_search = WebDriverWait(driver, 2).until(
-                EC.element_to_be_clickable((By.ID, "openSearch"))
-            )
-            open_search.click()
-            print("📂 Avattiin hakulomake")
-        except:
-            print("✅ Hakulomake jo auki")
+def _to_int(val: str) -> int:
+    if val is None:
+        return 0
+    s = re.sub(r"[^\d]", "", str(val))
+    try:
+        return int(s) if s else 0
+    except ValueError:
+        return 0
 
-        # Odotetaan että kenttä on klikattavissa
-        input_field = WebDriverWait(driver, max_odotus).until(
-            EC.element_to_be_clickable((By.ID, "postalField"))
-        )
-        input_field.clear()
-        input_field.send_keys(haku)
-        time.sleep(0.5)  # Odota että kentän syöttö aktivoi lomakkeen
+def _read_rows():
+    if not os.path.exists(CSV_PATH):
+        return []
+    with open(CSV_PATH, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return list(reader)
 
-        # Klikkaa hakunappia manuaalisesti
-        search_button = WebDriverWait(driver, max_odotus).until(
-            EC.element_to_be_clickable((By.ID, "search"))
-        )
-        search_button.click()
-        time.sleep(0.5)
+def hae_hintatiedot_kaupunginosalla(sijainti: str) -> Tuple[Optional[float], int]:
+    """
+    Palauttaa (mediaani_hinta_m2, vertailujen_maara) annetulle kaupunginosalle tai postinumerolle.
+    Data luetaan paikallisesta CSV:stä -> ei mitään selainajureita.
+    """
+    if not sijainti:
+        return (None, 0)
 
-        # Lähetä vielä varmuudeksi lomake
-        form = driver.find_element(By.TAG_NAME, "form")
-        form.submit()
+    s = sijainti.strip()
+    if s.isdigit() and len(s) == 5:
+        target = postinumero_to_kaupunginosa(s) or s
+    else:
+        target = s
+    norm_target = _norm(target)
 
-        print("🕒 Odotetaan tulostaulukkoa...")
-        WebDriverWait(driver, max_odotus).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
-        )
-        time.sleep(2)
+    rows = _read_rows()
+    if not rows:
+        return (None, 0)
 
-        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-        hinnat = []
+    # yritetään ensin tarkka osuma "kaupunginosa"/"alue"
+    best_mediaani, best_maara = None, 0
+    for r in rows:
+        nimi = _norm(r.get("kaupunginosa") or r.get("alue") or r.get("district") or "")
+        if not nimi:
+            continue
+        if nimi == norm_target:
+            best_mediaani = _to_float(r.get("mediaani") or r.get("median") or r.get("€/m2") or r.get("price_per_m2"))
+            best_maara = _to_int(r.get("maara") or r.get("count") or r.get("n"))
+            if best_mediaani is not None:
+                return (best_mediaani, best_maara)
 
-        for row in rows:
-            cells = row.find_elements(By.TAG_NAME, "td")
-            if len(cells) >= 6:
-                teksti = cells[5].text.replace("€", "").replace(",", ".").replace(" ", "").strip()
-                try:
-                    arvo = float(teksti)
-                    hinnat.append(arvo)
-                except ValueError:
-                    continue
+    # muuten löyhempi osuma (substring)
+    for r in rows:
+        nimi = _norm(r.get("kaupunginosa") or r.get("alue") or r.get("district") or "")
+        if not nimi or norm_target not in nimi:
+            continue
+        m = _to_float(r.get("mediaani") or r.get("median") or r.get("€/m2") or r.get("price_per_m2"))
+        if m is not None:
+            best_mediaani = m
+            best_maara = _to_int(r.get("maara") or r.get("count") or r.get("n"))
+            break
 
-        print("🔎 Löytyi", len(hinnat), "hintaa")
-        print("➡️ Ensimmäiset:", hinnat[:5])
-
-        driver.quit()
-        if not hinnat:
-            return None, 0
-        return round(statistics.median(hinnat)), len(hinnat)
-
-    except Exception as e:
-        print("📦 Scraper error:", e)
-        with open("page_source.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        driver.quit()
-        return None, 0
+    return (best_mediaani, best_maara)

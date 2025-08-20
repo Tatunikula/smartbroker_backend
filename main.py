@@ -21,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from fastapi.responses import StreamingResponse, JSONResponse
 import io, os, json
-# --- POISTETTU: import pdfkit
 from datetime import datetime
 # tiedoston yläosaan muiden importtien jälkeen
 from playwright.sync_api import sync_playwright
