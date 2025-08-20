@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+
+# App data
+exports/
+ilmoitukset.json
+
+# OS/Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Misc
+page_source.html
