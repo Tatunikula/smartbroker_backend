@@ -7,3 +7,5 @@ pytesseract
 Pillow
 playwright
 python-multipart
+python-dotenv
+beautifulsoup4
