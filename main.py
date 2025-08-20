@@ -77,7 +77,7 @@ app.add_middleware(
 
 # -------------------- HTML -> PDF Playwrightilla --------------------
 import asyncio
-
+from playwright.async_api import async_playwright
 
 async def _html_to_pdf_bytes_async(html_str: str) -> bytes:
     async with async_playwright() as p:
@@ -118,36 +118,28 @@ def _normalize_text(s: str) -> str:
 
 def extract_text_from_pdf(file_bytes):
     try:
-        import platform
+        # Windows Tesseract: ei haittaa muilla alustoilla
+        os.environ["TESSDATA_PREFIX"] = r"C:\\Users\\User\\Downloads\\tesseract-ocr-w64-setup-5.5.0.20241111\\tessdata"
 
-        # Aseta Tesseractin polku vain Windowsissa (ei pilvessä/Linuxissa)
-        if platform.system() == "Windows":
-            os.environ["TESSDATA_PREFIX"] = r"C:\\Users\\User\\Downloads\\tesseract-ocr-w64-setup-5.5.0.20241111\\tessdata"
-
-        # Lue sisään bytes
-        content = file_bytes.read() if hasattr(file_bytes, "read") else file_bytes
-
-        # 1) Suora tekstinpoiminta PDF:stä
+        content = file_bytes.read()
         reader = PdfReader(BytesIO(content))
         texts = []
         for p in reader.pages:
             t = p.extract_text() or ""
-            if t.strip():
+            if t:
                 texts.append(t)
         text = "\n".join(texts)
         if text.strip():
             return _normalize_text(text)
 
-        # 2) OCR-fallback (kuvamuotoiset PDF:t)
+        # OCR fallback
         images = convert_from_bytes(content, timeout=30)
         with ThreadPoolExecutor() as ex:
             ocr_texts = list(ex.map(lambda img: pytesseract.image_to_string(img, lang="fin"), images))
         return _normalize_text("\n".join(ocr_texts))
-
     except Exception as e:
         print("❌ PDF-tekstinluku epäonnistui:", e)
         return ""
-
 
 def split_chunks(s: str, max_len: int = 12000):
     # Säilytä kaikki chunkit; älä pudota lyhyitä rippeitä (niissä on usein talousrivit)
